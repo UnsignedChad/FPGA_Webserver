@@ -100,7 +100,7 @@ process(clk)
     begin
         if rising_edge(clk) then
             case counter is
-                when  "000" =>  if ch0_lookup_request = '1' then
+                when  "00" =>  if ch0_lookup_request = '1' then
                                    arp_lookup_ip   <= ch0_lookup_ip;
                                    ch0_in_progress <= '1';
                                 else
@@ -119,7 +119,7 @@ process(clk)
                                 end if; 
 
 
-                when  "001" =>  if ch1_lookup_request = '1' then
+                when  "01" =>  if ch1_lookup_request = '1' then
                                    arp_lookup_ip   <= ch1_lookup_ip;
                                    ch1_in_progress <= '1';
                                 else
@@ -137,7 +137,7 @@ process(clk)
                                     arp_request <= '0';
                                 end if; 
 
-                when  "010" =>  if ch2_lookup_request = '1' then
+                when  "10" =>  if ch2_lookup_request = '1' then
                                    arp_lookup_ip   <= ch2_lookup_ip;
                                    ch2_in_progress <= '1';
                                 else
