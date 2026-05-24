@@ -53,26 +53,27 @@ architecture sim of tb_harness is
     signal rx_frame_len   : integer := 0;
     signal rx_frame_count : integer := 0;
 
-    -- ---- DUT component ----
-    component main_design is
-        generic (
-            our_mac     : std_logic_vector(47 downto 0) := (others => '0');
-            our_netmask : std_logic_vector(31 downto 0) := (others => '0');
-            our_ip      : std_logic_vector(31 downto 0) := (others => '0'));
-        port (
-            clk125Mhz          : in  std_logic;
-            clk125Mhz90        : in  std_logic;
-            input_empty        : in  std_logic;
-            input_read         : out std_logic;
-            input_data         : in  std_logic_vector(7 downto 0);
-            input_data_present : in  std_logic;
-            input_data_error   : in  std_logic;
-            phy_ready          : in  std_logic;
-            status             : out std_logic_vector(3 downto 0);
-            eth_txck           : out std_logic;
-            eth_txctl          : out std_logic;
-            eth_txd            : out std_logic_vector(3 downto 0));
-    end component;
+    -- ---- UDP RX observation ----
+    signal udp_rx_valid         : std_logic;
+    signal udp_rx_data          : std_logic_vector(7 downto 0);
+    signal udp_rx_src_ip        : std_logic_vector(31 downto 0);
+    signal udp_rx_src_port      : std_logic_vector(15 downto 0);
+    signal udp_rx_dst_broadcast : std_logic;
+    signal udp_rx_dst_port      : std_logic_vector(15 downto 0);
+
+    -- Captured UDP RX bytes
+    signal udp_rx_buf   : byte_array_t(0 to 1023) := (others => (others => '0'));
+    signal udp_rx_len   : integer := 0;
+    signal udp_rx_count : integer := 0;  -- increments per complete RX packet
+
+    -- ---- UDP TX drive ----
+    signal udp_tx_busy     : std_logic;
+    signal udp_tx_valid    : std_logic := '0';
+    signal udp_tx_data     : std_logic_vector(7 downto 0)  := (others => '0');
+    signal udp_tx_src_port : std_logic_vector(15 downto 0) := (others => '0');
+    signal udp_tx_dst_mac  : std_logic_vector(47 downto 0) := (others => '0');
+    signal udp_tx_dst_ip   : std_logic_vector(31 downto 0) := (others => '0');
+    signal udp_tx_dst_port : std_logic_vector(15 downto 0) := (others => '0');
 
 begin
 
@@ -89,24 +90,37 @@ begin
         wait for 2 ns;
     end process;
 
-    i_dut: main_design
+    i_dut: entity work.main_design
         generic map (
             our_mac     => our_mac,
             our_netmask => our_netmask,
             our_ip      => our_ip)
         port map (
-            clk125Mhz          => clk125Mhz,
-            clk125Mhz90        => clk125Mhz90,
-            input_empty        => input_empty,
-            input_read         => input_read,
-            input_data         => input_data,
-            input_data_present => input_data_present,
-            input_data_error   => input_data_error,
-            phy_ready          => phy_ready,
-            status             => status,
-            eth_txck           => eth_txck,
-            eth_txctl          => eth_txctl,
-            eth_txd            => eth_txd);
+            clk125Mhz            => clk125Mhz,
+            clk125Mhz90          => clk125Mhz90,
+            input_empty          => input_empty,
+            input_read           => input_read,
+            input_data           => input_data,
+            input_data_present   => input_data_present,
+            input_data_error     => input_data_error,
+            phy_ready            => phy_ready,
+            status               => status,
+            udp_rx_valid         => udp_rx_valid,
+            udp_rx_data          => udp_rx_data,
+            udp_rx_src_ip        => udp_rx_src_ip,
+            udp_rx_src_port      => udp_rx_src_port,
+            udp_rx_dst_broadcast => udp_rx_dst_broadcast,
+            udp_rx_dst_port      => udp_rx_dst_port,
+            udp_tx_busy          => udp_tx_busy,
+            udp_tx_valid         => udp_tx_valid,
+            udp_tx_data          => udp_tx_data,
+            udp_tx_src_port      => udp_tx_src_port,
+            udp_tx_dst_mac       => udp_tx_dst_mac,
+            udp_tx_dst_ip        => udp_tx_dst_ip,
+            udp_tx_dst_port      => udp_tx_dst_port,
+            eth_txck             => eth_txck,
+            eth_txctl            => eth_txctl,
+            eth_txd              => eth_txd);
 
     -- ----------------------------------------------------------------
     -- TX snoop: capture bytes flowing into tx_rgmii_sim via external name.
@@ -131,6 +145,30 @@ begin
                 rx_frame_count <= rx_frame_count + 1;
                 len            := 0;
                 was_valid      := '0';
+            end if;
+        end if;
+    end process;
+
+    -- ----------------------------------------------------------------
+    -- UDP RX snoop: accumulate udp_rx_data into udp_rx_buf while
+    -- udp_rx_valid is high; bump udp_rx_count when valid drops.
+    -- ----------------------------------------------------------------
+    udp_rx_snoop: process(clk125MHz)
+        variable len : integer := 0;
+        variable was_valid : std_logic := '0';
+    begin
+        if rising_edge(clk125MHz) then
+            if udp_rx_valid = '1' then
+                if len < udp_rx_buf'length then
+                    udp_rx_buf(len) <= udp_rx_data;
+                    len := len + 1;
+                end if;
+                was_valid := '1';
+            elsif was_valid = '1' then
+                udp_rx_len   <= len;
+                udp_rx_count <= udp_rx_count + 1;
+                len := 0;
+                was_valid := '0';
             end if;
         end if;
     end process;
@@ -187,7 +225,9 @@ begin
         variable n_passed       : integer := 0;
         variable n_failed       : integer := 0;
         variable last_frame_cnt : integer := 0;
+        variable last_udp_cnt   : integer := 0;
         variable got_reply      : boolean;
+        variable got_udp        : boolean;
 
         -- Wait up to timeout_us microseconds for the snoop to capture
         -- a new TX frame (rx_frame_count increment). Sets got_reply.
@@ -200,6 +240,22 @@ begin
                 if rx_frame_count >= target then
                     got_reply := true;
                     last_frame_cnt := target;
+                    exit;
+                end if;
+                wait until rising_edge(clk125Mhz);
+            end loop;
+        end procedure;
+
+        -- Wait up to timeout_us for a complete UDP RX packet
+        procedure wait_for_udp_rx(timeout_us : integer) is
+            variable target : integer;
+        begin
+            target := last_udp_cnt + 1;
+            got_udp := false;
+            for i in 0 to timeout_us * 125 loop
+                if udp_rx_count >= target then
+                    got_udp := true;
+                    last_udp_cnt := target;
                     exit;
                 end if;
                 wait until rising_edge(clk125Mhz);
@@ -274,6 +330,45 @@ begin
         else
             report "PASS: ICMP echo reply received";
             n_passed := n_passed + 1;
+        end if;
+
+        ----------------------------------------------------------------
+        report "=== Scenario 3: UDP packet -> udp_rx_* signals ===";
+        ----------------------------------------------------------------
+        push_frame(make_udp(sender_mac, sender_ip,
+                            dut_mac_wire, dut_ip_wire,
+                            x"1234", x"1235",     -- src_port, dst_port
+                            PING_PAYLOAD));        -- 32 bytes
+        wait_for_udp_rx(20);
+
+        if not got_udp then
+            report "FAIL: udp_rx_valid never asserted after UDP packet" severity error;
+            n_failed := n_failed + 1;
+        elsif udp_rx_len /= 32 then
+            report "FAIL: udp_rx_len = " & integer'image(udp_rx_len) & ", expected 32" severity error;
+            n_failed := n_failed + 1;
+        elsif udp_rx_dst_port /= x"1235" then
+            report "FAIL: udp_rx_dst_port wrong" severity error;
+            n_failed := n_failed + 1;
+        elsif udp_rx_src_port /= x"1234" then
+            report "FAIL: udp_rx_src_port wrong" severity error;
+            n_failed := n_failed + 1;
+        else
+            -- check payload bytes
+            for i in 0 to 31 loop
+                if udp_rx_buf(i) /= PING_PAYLOAD(i) then
+                    report "FAIL: udp_rx_buf(" & integer'image(i) & ") = " &
+                        integer'image(to_integer(unsigned(udp_rx_buf(i)))) &
+                        ", expected " & integer'image(to_integer(unsigned(PING_PAYLOAD(i))))
+                        severity error;
+                    n_failed := n_failed + 1;
+                    exit;
+                end if;
+            end loop;
+            if n_failed = 0 or rx_frame_count = last_frame_cnt then
+                report "PASS: UDP packet received with correct ports and payload";
+                n_passed := n_passed + 1;
+            end if;
         end if;
 
         ----------------------------------------------------------------
