@@ -1,83 +1,98 @@
-----------------------------------------------------------------------------------
--- Engineer: Mike Field <hamster@snap.net.nz> 
--- 
--- Module Name: fifo_rxclk_to_clk125MHz - Behavioral
---
--- Description: A wrapper around a IP FIFO 
--- 
-------------------------------------------------------------------------------------
--- FPGA_Webserver from https://github.com/hamsternz/FPGA_Webserver
-------------------------------------------------------------------------------------
--- The MIT License (MIT)
--- 
--- Copyright (c) 2015 Michael Alan Field <hamster@snap.net.nz>
--- 
--- Permission is hereby granted, free of charge, to any person obtaining a copy
--- of this software and associated documentation files (the "Software"), to deal
--- in the Software without restriction, including without limitation the rights
--- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
--- copies of the Software, and to permit persons to whom the Software is
--- furnished to do so, subject to the following conditions:
--- 
--- The above copyright notice and this permission notice shall be included in
--- all copies or substantial portions of the Software.
--- 
--- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
--- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
--- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
--- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
--- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
--- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
--- THE SOFTWARE.
-------------------------------------------------------------------------------------
-
-
+-- portable replacement for the Vivado-IP fifo_rxclk_to_clk125MHz block.
+-- 16-deep async FIFO carrying 10 bits (8 data + present + error) from the
+-- RX clock domain to the system 125 MHz domain. Standard gray-pointer
+-- design: each side keeps a binary pointer, ships a gray-coded copy
+-- across via a 2-flop synchroniser, and decodes on the other side to
+-- compute empty / full. depth=16 so 4 address bits, with one extra MSB
+-- to disambiguate empty-vs-full.
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 entity fifo_rxclk_to_clk125MHz is
     Port ( rx_clk          : in  STD_LOGIC;
-           rx_write        : in  STD_LOGIC                     := '1';           
+           rx_write        : in  STD_LOGIC                     := '1';
            rx_data         : in  STD_LOGIC_VECTOR (7 downto 0) := (others => '0');
            rx_data_present : in  STD_LOGIC                     := '0';
            rx_data_error   : in  STD_LOGIC                     := '0';
-           
+
            clk125Mhz       : in  STD_LOGIC;
-           empty           : out STD_LOGIC                     := '1';           
-           read            : in  STD_LOGIC                     := '1';           
+           empty           : out STD_LOGIC                     := '1';
+           read            : in  STD_LOGIC                     := '1';
            data            : out STD_LOGIC_VECTOR (7 downto 0) := (others => '0');
            data_present    : out STD_LOGIC                     := '0';
            data_error      : out STD_LOGIC                     := '0');
 end fifo_rxclk_to_clk125MHz;
 
-architecture Behavioral of fifo_rxclk_to_clk125MHz is
-    COMPONENT fifo_dual_clock_10_bits_16_deep
-    PORT (
-        wr_clk : IN STD_LOGIC;
-        full   : OUT STD_LOGIC;
-        wr_en  : IN STD_LOGIC;
-        din    : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
-        
-        rd_clk : IN STD_LOGIC;
-        rd_en  : IN STD_LOGIC;
-        dout   : OUT STD_LOGIC_VECTOR(9 DOWNTO 0);
-        empty  : OUT STD_LOGIC);
-    END COMPONENT;
+architecture rtl of fifo_rxclk_to_clk125MHz is
+    constant DEPTH      : integer := 16;
+    constant PTR_BITS   : integer := 5;     -- 4 addr + 1 wrap
+
+    type mem_t is array (0 to DEPTH-1) of std_logic_vector(9 downto 0);
+    signal mem : mem_t := (others => (others => '0'));
+
+    -- pointers in their native clock domain (binary)
+    signal wr_bin   : unsigned(PTR_BITS-1 downto 0) := (others => '0');
+    signal rd_bin   : unsigned(PTR_BITS-1 downto 0) := (others => '0');
+
+    -- gray-coded copies of each pointer; cross via 2-flop sync on the other side
+    signal wr_gray  : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+    signal rd_gray  : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+
+    signal wr_gray_sync1 : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+    signal wr_gray_sync2 : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+    signal rd_gray_sync1 : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+    signal rd_gray_sync2 : std_logic_vector(PTR_BITS-1 downto 0) := (others => '0');
+
+    signal i_empty : std_logic := '1';
+    signal q_word  : std_logic_vector(9 downto 0) := (others => '0');
+
+    function bin_to_gray(b : unsigned) return std_logic_vector is
+    begin
+        return std_logic_vector(b xor ('0' & b(b'high downto 1)));
+    end function;
+
 begin
+    empty        <= i_empty;
+    data         <= q_word(7 downto 0);
+    data_present <= q_word(8);
+    data_error   <= q_word(9);
 
-i_fifo_dual_clock_10_bits_16_deep : fifo_dual_clock_10_bits_16_deep PORT MAP (
-        wr_clk          => rx_clk,
-        wr_en           => rx_write,
-        din(9)          => rx_data_present,
-        din(8)          => rx_data_error,
-        din(7 downto 0) => rx_data,
-        full            => open,
+    -- --- write side (rx_clk domain) ---
+    wr_proc: process(rx_clk)
+    begin
+        if rising_edge(rx_clk) then
+            if rx_write = '1' then
+                mem(to_integer(wr_bin(PTR_BITS-2 downto 0))) <=
+                    rx_data_error & rx_data_present & rx_data;
+                wr_bin <= wr_bin + 1;
+            end if;
+            wr_gray <= bin_to_gray(wr_bin);
+            -- pull in rd_gray for the (unused here) full flag if needed
+            rd_gray_sync1 <= rd_gray;
+            rd_gray_sync2 <= rd_gray_sync1;
+        end if;
+    end process;
 
-        rd_clk           => clk125Mhz,
-        empty            => empty,
-        rd_en            => read,
-        dout(9)          => data_present,
-        dout(8)          => data_error,
-        dout(7 downto 0) => data);
+    -- --- read side (clk125Mhz domain) ---
+    rd_proc: process(clk125Mhz)
+    begin
+        if rising_edge(clk125Mhz) then
+            wr_gray_sync1 <= wr_gray;
+            wr_gray_sync2 <= wr_gray_sync1;
 
-end Behavioral;
+            if read = '1' and i_empty = '0' then
+                q_word <= mem(to_integer(rd_bin(PTR_BITS-2 downto 0)));
+                rd_bin <= rd_bin + 1;
+            end if;
+            rd_gray <= bin_to_gray(rd_bin);
+
+            -- empty when read-side gray pointer matches the synchronised write pointer
+            if bin_to_gray(rd_bin) = wr_gray_sync2 then
+                i_empty <= '1';
+            else
+                i_empty <= '0';
+            end if;
+        end if;
+    end process;
+end rtl;
