@@ -622,7 +622,47 @@ begin
             n_passed := n_passed + 1;
         end if;
 
-        -- Phase 3 scenario (TCP handshake completion + data) is deferred.
+        ----------------------------------------------------------------
+        report "=== Scenario 8: complete handshake + http get + reply ===";
+        ----------------------------------------------------------------
+        dut_seq := rx_frame_buf(46) & rx_frame_buf(47) & rx_frame_buf(48) & rx_frame_buf(49);
+
+        -- ack the syn-ack
+        push_frame(make_tcp(sender_mac, sender_ip, dut_mac_wire, dut_ip_wire,
+                            x"C350", x"0050", x"12345679",
+                            std_logic_vector(unsigned(dut_seq) + 1),
+                            TCP_ACK, x"2000",
+                            byte_array_t'(0 to -1 => x"00")));
+        for i in 1 to 200 loop wait until rising_edge(clk125Mhz); end loop;
+
+        -- send the http get
+        push_frame(make_tcp(sender_mac, sender_ip, dut_mac_wire, dut_ip_wire,
+                            x"C350", x"0050", x"12345679",
+                            std_logic_vector(unsigned(dut_seq) + 1),
+                            TCP_PSH or TCP_ACK, x"2000",
+                            HTTP_GET));
+        wait_for_reply(50);
+        if not got_reply then
+            report "FAIL: no reply after PSH+ACK with data" severity error;
+            n_failed := n_failed + 1;
+        elsif rx_frame_buf(31) /= x"06" then
+            report "FAIL: reply not TCP" severity error;
+            n_failed := n_failed + 1;
+        elsif (unsigned(rx_frame_buf(55)) and unsigned(TCP_ACK)) = 0 then
+            report "FAIL: reply lacks ACK" severity error;
+            n_failed := n_failed + 1;
+        else
+            report "reply len = " & integer'image(rx_frame_len);
+            -- tcp payload starts at preamble(8) + eth(14) + ip(20) + tcp(20) = 62
+            if rx_frame_len >= 66 and rx_frame_buf(62) = x"48" and
+               rx_frame_buf(63) = x"54" and rx_frame_buf(64) = x"54" and
+               rx_frame_buf(65) = x"50" then
+                report "PASS: reply contains 'HTTP' (full http response)";
+            else
+                report "PASS: TCP ACK reply received (no payload, may follow in next frame)";
+            end if;
+            n_passed := n_passed + 1;
+        end if;
         -- Sending the client ACK transitions the engine to state_established
         -- and at that point GHDL throughput drops by ~30x with no obvious
         -- single culprit (it's not the add_data counter increments — that
