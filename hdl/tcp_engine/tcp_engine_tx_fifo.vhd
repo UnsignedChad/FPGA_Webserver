@@ -85,7 +85,7 @@ architecture Behavioral of tcp_engine_tx_fifo is
         
         empty    : out std_logic := '0';
         read_en  : in  std_logic; 
-        data_out : out  std_logic_vector := (others => '0'));
+        data_out : out  std_logic_vector);
     end component;
 
     signal data_in  : std_logic_vector(192 downto 0) := (others => '0');

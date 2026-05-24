@@ -41,9 +41,9 @@ entity fifo_32 is
     
         full     : out std_logic := '0';
         write_en : in  std_logic := '0';
-        data_in  : in  std_logic_vector := (others => '1');
+        data_in  : in  std_logic_vector;
         
-        data_out : out  std_logic_vector := (others => '1');
+        data_out : out  std_logic_vector;
         empty    : out std_logic := '0';
         read_en  : in  std_logic := '0'
         );
