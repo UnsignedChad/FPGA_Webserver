@@ -42,10 +42,16 @@ architecture sim of tb_harness is
     constant our_ip      : std_logic_vector(31 downto 0) := x"0A_00_00_0A";       -- 10.0.0.10
     constant our_netmask : std_logic_vector(31 downto 0) := x"00_FF_FF_FF";       -- 255.255.255.0
 
-    -- captured TX frame
+    constant PING_PAYLOAD : byte_array_t(0 to 31) :=
+        (x"00", x"01", x"02", x"03", x"04", x"05", x"06", x"07",
+         x"08", x"09", x"0A", x"0B", x"0C", x"0D", x"0E", x"0F",
+         x"10", x"11", x"12", x"13", x"14", x"15", x"16", x"17",
+         x"18", x"19", x"1A", x"1B", x"1C", x"1D", x"1E", x"1F");
+
+    -- captured TX frame; rx_frame_count increments each time a frame completes
     signal rx_frame_buf   : byte_array_t(0 to 1023) := (others => (others => '0'));
     signal rx_frame_len   : integer := 0;
-    signal rx_frame_ready : boolean := false;
+    signal rx_frame_count : integer := 0;
 
     -- ---- DUT component ----
     component main_design is
@@ -119,11 +125,10 @@ begin
                     rx_frame_buf(len) <= snoop_byte;
                     len := len + 1;
                 end if;
-                rx_frame_ready <= false;
                 was_valid := '1';
             elsif was_valid = '1' then
                 rx_frame_len   <= len;
-                rx_frame_ready <= true;
+                rx_frame_count <= rx_frame_count + 1;
                 len            := 0;
                 was_valid      := '0';
             end if;
@@ -171,53 +176,107 @@ begin
             input_empty <= '1';
         end procedure;
 
+        -- sender_mac / sender_ip are network-order constants (NOT byte-reversed)
         constant sender_mac : std_logic_vector(47 downto 0) := x"A0_B3_CC_4C_F9_EF";
-        constant sender_ip  : std_logic_vector(31 downto 0) := x"0A_00_00_01";
-        variable n_passed   : integer := 0;
-        variable n_failed   : integer := 0;
+        constant sender_ip  : std_logic_vector(31 downto 0) := x"0A_00_00_01";  -- 10.0.0.1
+
+        -- Network-order versions of dut MAC / IP for crafting frames TO the DUT
+        constant dut_mac_wire : std_logic_vector(47 downto 0) := x"02_23_45_67_89_AB";
+        constant dut_ip_wire  : std_logic_vector(31 downto 0) := x"0A_00_00_0A";  -- 10.0.0.10
+
+        variable n_passed       : integer := 0;
+        variable n_failed       : integer := 0;
+        variable last_frame_cnt : integer := 0;
+        variable got_reply      : boolean;
+
+        -- Wait up to timeout_us microseconds for the snoop to capture
+        -- a new TX frame (rx_frame_count increment). Sets got_reply.
+        procedure wait_for_reply(timeout_us : integer) is
+            variable target : integer;
+        begin
+            target := last_frame_cnt + 1;
+            got_reply := false;
+            for i in 0 to timeout_us * 125 loop  -- 125 cycles per us
+                if rx_frame_count >= target then
+                    got_reply := true;
+                    last_frame_cnt := target;
+                    exit;
+                end if;
+                wait until rising_edge(clk125Mhz);
+            end loop;
+        end procedure;
+
     begin
         wait for 500 ns;
         -- Let detect_speed_and_reassemble_bytes lock onto the 1Gb link
         drive_idle(64);
 
+        ----------------------------------------------------------------
         report "=== Scenario 1: ARP request -> ARP reply ===";
-        push_frame(make_arp_request(sender_mac, sender_ip, our_ip));
+        ----------------------------------------------------------------
+        push_frame(make_arp_request(sender_mac, sender_ip, dut_ip_wire));
+        wait_for_reply(50);
 
-        for i in 0 to 5000 loop
-            exit when rx_frame_ready;
-            wait until rising_edge(clk125Mhz);
-        end loop;
-
-        if not rx_frame_ready then
+        if not got_reply then
             report "FAIL: no TX frame observed after ARP request" severity error;
             n_failed := n_failed + 1;
+        elsif rx_frame_len < 50 then
+            report "FAIL: reply too short (" & integer'image(rx_frame_len) & ")" severity error;
+            n_failed := n_failed + 1;
+        elsif rx_frame_buf(20) /= x"08" or rx_frame_buf(21) /= x"06" then
+            report "FAIL: EtherType not ARP" severity error;
+            n_failed := n_failed + 1;
+        elsif rx_frame_buf(28) /= x"00" or rx_frame_buf(29) /= x"02" then
+            report "FAIL: not ARP reply opcode" severity error;
+            n_failed := n_failed + 1;
+        -- frame byte 6..11 = src MAC; +8 preamble offset => 14..19
+        -- our_mac stored byte-reversed; wire byte i = our_mac(7+i*8 : i*8)
+        elsif rx_frame_buf(14) /= our_mac( 7 downto  0) or
+              rx_frame_buf(15) /= our_mac(15 downto  8) or
+              rx_frame_buf(16) /= our_mac(23 downto 16) or
+              rx_frame_buf(17) /= our_mac(31 downto 24) or
+              rx_frame_buf(18) /= our_mac(39 downto 32) or
+              rx_frame_buf(19) /= our_mac(47 downto 40) then
+            report "FAIL: source MAC in reply is not our_mac" severity error;
+            n_failed := n_failed + 1;
         else
-            -- TX pipeline prepends 8-byte preamble before the frame, so wire indices shift by 8
-            if rx_frame_len < 50 then
-                report "FAIL: reply too short (" & integer'image(rx_frame_len) & " bytes)" severity error;
-                n_failed := n_failed + 1;
-            elsif rx_frame_buf(20) /= x"08" or rx_frame_buf(21) /= x"06" then
-                report "FAIL: EtherType not ARP" severity error;
-                n_failed := n_failed + 1;
-            elsif rx_frame_buf(28) /= x"00" or rx_frame_buf(29) /= x"02" then
-                report "FAIL: not ARP reply opcode" severity error;
-                n_failed := n_failed + 1;
-            -- frame byte 14..19 = src MAC; with 8-byte preamble, indices 22..27
-            -- our_mac is stored byte-reversed; wire byte i = our_mac(7+i*8 : i*8)
-            elsif rx_frame_buf(14) /= our_mac( 7 downto  0) or
-                  rx_frame_buf(15) /= our_mac(15 downto  8) or
-                  rx_frame_buf(16) /= our_mac(23 downto 16) or
-                  rx_frame_buf(17) /= our_mac(31 downto 24) or
-                  rx_frame_buf(18) /= our_mac(39 downto 32) or
-                  rx_frame_buf(19) /= our_mac(47 downto 40) then
-                report "FAIL: source MAC in reply is not our_mac" severity error;
-                n_failed := n_failed + 1;
-            else
-                report "PASS: ARP reply received with correct MAC";
-                n_passed := n_passed + 1;
-            end if;
+            report "PASS: ARP reply received with correct MAC";
+            n_passed := n_passed + 1;
         end if;
 
+        ----------------------------------------------------------------
+        report "=== Scenario 2: ICMP echo request -> echo reply ===";
+        ----------------------------------------------------------------
+        push_frame(make_icmp_echo(sender_mac, sender_ip,
+                                   dut_mac_wire, dut_ip_wire,
+                                   x"BEEF", x"0001", PING_PAYLOAD));
+        wait_for_reply(50);
+
+        if not got_reply then
+            report "FAIL: no TX frame after ICMP echo request" severity error;
+            n_failed := n_failed + 1;
+        elsif rx_frame_len < 50 then
+            report "FAIL: ICMP reply too short (" & integer'image(rx_frame_len) & ")" severity error;
+            n_failed := n_failed + 1;
+        -- EtherType IPv4 at wire offset 12..13 -> rx_frame_buf 20..21
+        elsif rx_frame_buf(20) /= x"08" or rx_frame_buf(21) /= x"00" then
+            report "FAIL: ICMP reply EtherType not IPv4" severity error;
+            n_failed := n_failed + 1;
+        -- IP protocol field at wire offset 14+9=23 -> rx_frame_buf 31
+        elsif rx_frame_buf(31) /= x"01" then
+            report "FAIL: IP protocol not ICMP (0x01) in reply" severity error;
+            n_failed := n_failed + 1;
+        -- ICMP type at IP payload start (wire offset 14+20=34) -> rx_frame_buf 42
+        elsif rx_frame_buf(42) /= x"00" then
+            report "FAIL: ICMP reply type not 0 (echo reply); got 0x" &
+                   integer'image(to_integer(unsigned(rx_frame_buf(42)))) severity error;
+            n_failed := n_failed + 1;
+        else
+            report "PASS: ICMP echo reply received";
+            n_passed := n_passed + 1;
+        end if;
+
+        ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";
         if n_failed = 0 then
             report "ALL TESTS PASSED" severity note;
