@@ -151,6 +151,10 @@ architecture Behavioral of main_design is
     signal link_full_duplex    : STD_LOGIC;
 
     component defragment_and_check_crc is
+    generic (
+        check_crc  : boolean := true;
+        filter_mac : boolean := true;
+        our_mac    : std_logic_vector(47 downto 0) := (others => '0'));
     Port ( 
         clk                : in  STD_LOGIC;
         input_data_enable  : in  STD_LOGIC;           
@@ -395,7 +399,8 @@ i_detect_speed_and_reassemble_bytes: detect_speed_and_reassemble_bytes port map 
     -- It also provides a handy place to check the FCS, allowing pacckets 
     -- with errors or corruption to be dropped early. 
     ----------------------------------------------------------------------
-i_defragment_and_check_crc: defragment_and_check_crc port map (
+i_defragment_and_check_crc: defragment_and_check_crc
+    generic map (our_mac => our_mac) port map (
     clk                => clk125Mhz,
     
     input_data_enable  => spaced_out_data_enable,     

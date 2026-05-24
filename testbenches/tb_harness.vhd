@@ -568,6 +568,23 @@ begin
         end if;
 
         ----------------------------------------------------------------
+        report "=== Scenario 6 (Phase 2): frame to wrong unicast MAC must be dropped ===";
+        ----------------------------------------------------------------
+        -- Send an ICMP echo to dut_ip but with a unicast dst MAC that isn't ours.
+        push_frame(make_icmp_echo(sender_mac, sender_ip,
+                                   x"DE_AD_BE_EF_CA_FE", dut_ip_wire,
+                                   x"BEEF", x"0002", PING_PAYLOAD));
+        wait_for_reply(40);
+
+        if got_reply then
+            report "FAIL: DUT replied to frame addressed to a different unicast MAC" severity error;
+            n_failed := n_failed + 1;
+        else
+            report "PASS: wrong-MAC unicast frame dropped";
+            n_passed := n_passed + 1;
+        end if;
+
+        ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";
         if n_failed = 0 then
             report "ALL TESTS PASSED" severity note;
