@@ -73,3 +73,49 @@ sim-tbs: analyze
 
 clean:
 	rm -rf sim/
+
+# ---------------------------------------------------------------------
+# ecp5 build for colorlight 5a-75b. requires ghdl-yosys-plugin + nextpnr-ecp5
+# + fpga-trellis + openfpgaloader. apt has the last three; the plugin
+# needs building from source against the installed ghdl.
+#
+#   make ecp5             # synthesise + place + pack to build/top.bit
+#   make ecp5-prog        # flash via FT232H JTAG
+# ---------------------------------------------------------------------
+
+ECP5_PART     := 25k
+ECP5_PACKAGE  := CABGA256
+ECP5_TOP      := top_colorlight
+ECP5_LPF      := constraints/colorlight_5a_75b.lpf
+ECP5_BUILD    := build/ecp5
+
+# rtl sources for synth: everything in hdl/ EXCEPT the xilinx-specific
+# originals that the ecp5/ directory shadows, the broken arp_resolver,
+# and the nexys-targeted FPGA_webserver port shell (top_colorlight wraps
+# the same entity but with the right pin shapes).
+ECP5_RTL := $(shell find hdl \
+    -name "*.vhd" \
+    ! -name arp_resolver.vhd \
+    ! -name clocking.vhd \
+    ! -name receive_raw_data.vhd \
+    ! -name tx_rgmii.vhd \
+    | sort) hdl/ecp5/clocking.vhd hdl/ecp5/receive_raw_data.vhd hdl/ecp5/tx_rgmii.vhd hdl/ecp5/top_colorlight.vhd
+
+$(ECP5_BUILD):
+	mkdir -p $@
+
+$(ECP5_BUILD)/top.json: $(ECP5_RTL) | $(ECP5_BUILD)
+	yosys -m ghdl -p "ghdl --std=08 -fsynopsys -frelaxed $(ECP5_RTL) -e $(ECP5_TOP); synth_ecp5 -json $@"
+
+$(ECP5_BUILD)/top.config: $(ECP5_BUILD)/top.json $(ECP5_LPF)
+	nextpnr-ecp5 --$(ECP5_PART) --package $(ECP5_PACKAGE) --speed 6 \
+	  --json $< --lpf $(ECP5_LPF) --textcfg $@
+
+$(ECP5_BUILD)/top.bit: $(ECP5_BUILD)/top.config
+	ecppack $< $@
+
+.PHONY: ecp5 ecp5-prog
+ecp5: $(ECP5_BUILD)/top.bit
+
+ecp5-prog: $(ECP5_BUILD)/top.bit
+	openFPGALoader -c ft232 $<
