@@ -12,12 +12,11 @@ STD        := --std=08
 GHDL_FLAGS := $(STD) --workdir=sim -fsynopsys -frelaxed
 
 # Files excluded from GHDL sim:
-#   arp_resolver.vhd      - half-written dead code (undeclared signals, never instantiated)
 #   clocking.vhd          - Xilinx UNISIM (MMCM)
 #   tx_rgmii.vhd          - Xilinx UNISIM (ODDR)
 #   receive_raw_data.vhd  - Xilinx UNISIM (IDDR)
 #   FPGA_webserver.vhd    - top-level wrapper that instantiates the above
-SIM_EXCLUDE := -name arp_resolver.vhd -o -name clocking.vhd -o -name tx_rgmii.vhd -o -name receive_raw_data.vhd -o -name FPGA_webserver.vhd
+SIM_EXCLUDE := -name clocking.vhd -o -name tx_rgmii.vhd -o -name receive_raw_data.vhd -o -name FPGA_webserver.vhd
 
 RTL_SIM := $(shell find hdl -path hdl/ecp5 -prune -o -name "*.vhd" ! \( $(SIM_EXCLUDE) \) -print | sort)
 SIM_STUBS := $(shell find sim_models -name "*.vhd" 2>/dev/null | sort)
@@ -90,12 +89,11 @@ ECP5_LPF      := constraints/colorlight_5a_75b.lpf
 ECP5_BUILD    := build/ecp5
 
 # rtl sources for synth: everything in hdl/ EXCEPT the xilinx-specific
-# originals that the ecp5/ directory shadows, the broken arp_resolver,
-# and the nexys-targeted FPGA_webserver port shell (top_colorlight wraps
+# originals that the ecp5/ directory shadows, plus the nexys-targeted FPGA_webserver port shell (top_colorlight wraps
 # the same entity but with the right pin shapes).
 ECP5_RTL := $(shell find hdl \
     -name "*.vhd" \
-    ! -name arp_resolver.vhd \
+    \
     ! -name clocking.vhd \
     ! -name receive_raw_data.vhd \
     ! -name tx_rgmii.vhd \
