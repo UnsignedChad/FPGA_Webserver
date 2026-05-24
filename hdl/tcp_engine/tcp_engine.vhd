@@ -576,8 +576,9 @@ send_packets: process(clk)
                 -- Send a few bytes of data with every ACK
                 tosend_data_addr  <= (others => '0');
                 if send_some_data = '1' then
-                   tosend_data_len  <= "00000010000";
-                   tosend_seq_num_next <= std_logic_vector(unsigned(tosend_seq_num)+16); 
+                   -- HTTP response in tcp_engine_content_memory is 119 bytes.
+                   tosend_data_len  <= std_logic_vector(to_unsigned(119, 11));
+                   tosend_seq_num_next <= std_logic_vector(unsigned(tosend_seq_num) + 119);
                 else
                    tosend_data_len   <= (others => '0');
                 end if;                    
