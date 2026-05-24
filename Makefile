@@ -19,7 +19,7 @@ GHDL_FLAGS := $(STD) --workdir=sim -fsynopsys -frelaxed
 #   FPGA_webserver.vhd    - top-level wrapper that instantiates the above
 SIM_EXCLUDE := -name arp_resolver.vhd -o -name clocking.vhd -o -name tx_rgmii.vhd -o -name receive_raw_data.vhd -o -name FPGA_webserver.vhd
 
-RTL_SIM := $(shell find hdl -name "*.vhd" ! \( $(SIM_EXCLUDE) \) | sort)
+RTL_SIM := $(shell find hdl -path hdl/ecp5 -prune -o -name "*.vhd" ! \( $(SIM_EXCLUDE) \) -print | sort)
 SIM_STUBS := $(shell find sim_models -name "*.vhd" 2>/dev/null | sort)
 
 # Testbenches that target FPGA_webserver (top, needs UNISIM) excluded from sim flow
