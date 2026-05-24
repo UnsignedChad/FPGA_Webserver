@@ -53,6 +53,27 @@ package net_pkg is
         payload    : byte_array_t
     ) return byte_array_t;
 
+    -- TCP flag bit positions in the 1-byte flags field at TCP header offset 13
+    constant TCP_FIN : std_logic_vector(7 downto 0) := x"01";
+    constant TCP_SYN : std_logic_vector(7 downto 0) := x"02";
+    constant TCP_RST : std_logic_vector(7 downto 0) := x"04";
+    constant TCP_PSH : std_logic_vector(7 downto 0) := x"08";
+    constant TCP_ACK : std_logic_vector(7 downto 0) := x"10";
+
+    function make_tcp(
+        sender_mac : std_logic_vector(47 downto 0);
+        sender_ip  : std_logic_vector(31 downto 0);
+        dut_mac    : std_logic_vector(47 downto 0);
+        dut_ip     : std_logic_vector(31 downto 0);
+        src_port   : std_logic_vector(15 downto 0);
+        dst_port   : std_logic_vector(15 downto 0);
+        seq_num    : std_logic_vector(31 downto 0);
+        ack_num    : std_logic_vector(31 downto 0);
+        flags      : std_logic_vector(7 downto 0);
+        window     : std_logic_vector(15 downto 0);
+        payload    : byte_array_t
+    ) return byte_array_t;
+
 end package net_pkg;
 
 package body net_pkg is
@@ -269,6 +290,106 @@ package body net_pkg is
         for i in 0 to pl_len - 1 loop
             f(50 + i) := payload(payload'low + i);
         end loop;
+
+        f(total - 4) := x"DE"; f(total - 3) := x"AD";
+        f(total - 2) := x"BE"; f(total - 1) := x"EF";
+        return f;
+    end function;
+
+    function make_tcp(
+        sender_mac : std_logic_vector(47 downto 0);
+        sender_ip  : std_logic_vector(31 downto 0);
+        dut_mac    : std_logic_vector(47 downto 0);
+        dut_ip     : std_logic_vector(31 downto 0);
+        src_port   : std_logic_vector(15 downto 0);
+        dst_port   : std_logic_vector(15 downto 0);
+        seq_num    : std_logic_vector(31 downto 0);
+        ack_num    : std_logic_vector(31 downto 0);
+        flags      : std_logic_vector(7 downto 0);
+        window     : std_logic_vector(15 downto 0);
+        payload    : byte_array_t
+    ) return byte_array_t is
+        constant pl_len  : integer := payload'length;
+        constant tcp_len : integer := 20 + pl_len;      -- TCP hdr + data
+        constant ip_len  : integer := 20 + tcp_len;
+        constant eth_len : integer := 14 + ip_len;
+        function max0(x : integer) return integer is
+        begin
+            if x > 0 then return x; else return 0; end if;
+        end;
+        constant pad_bytes   : integer := max0(46 - ip_len);
+        constant frame_bytes : integer := eth_len + pad_bytes + 4;
+        constant total       : integer := 8 + frame_bytes;
+        variable f         : byte_array_t(0 to total - 1) := (others => x"00");
+        variable ip_buf    : byte_array_t(0 to 19);
+        variable tcp_pseudo : byte_array_t(0 to 11 + tcp_len);  -- 12-byte pseudo + TCP
+        variable ck        : std_logic_vector(15 downto 0);
+        variable ip_len_v  : std_logic_vector(15 downto 0);
+        variable tcp_len_v : std_logic_vector(15 downto 0);
+    begin
+        f(0 to 7) := ETH_PREAMBLE;
+        for i in 0 to 5 loop
+            f(8 + i)  := dut_mac(47 - i*8 downto 40 - i*8);
+            f(14 + i) := sender_mac(47 - i*8 downto 40 - i*8);
+        end loop;
+        f(20) := x"08"; f(21) := x"00";   -- IPv4
+
+        ip_len_v := std_logic_vector(to_unsigned(ip_len, 16));
+        ip_buf(0)  := x"45";
+        ip_buf(1)  := x"00";
+        ip_buf(2)  := ip_len_v(15 downto 8);
+        ip_buf(3)  := ip_len_v( 7 downto 0);
+        ip_buf(4)  := x"00"; ip_buf(5) := x"03";
+        ip_buf(6)  := x"00"; ip_buf(7) := x"00";
+        ip_buf(8)  := x"40";
+        ip_buf(9)  := x"06";              -- Protocol TCP
+        ip_buf(10) := x"00"; ip_buf(11) := x"00";
+        for i in 0 to 3 loop
+            ip_buf(12 + i) := sender_ip(31 - i*8 downto 24 - i*8);
+            ip_buf(16 + i) := dut_ip(31 - i*8 downto 24 - i*8);
+        end loop;
+        ck := ip_checksum(ip_buf);
+        ip_buf(10) := ck(15 downto 8);
+        ip_buf(11) := ck( 7 downto 0);
+        for i in 0 to 19 loop
+            f(22 + i) := ip_buf(i);
+        end loop;
+
+        -- TCP header into f(42..61) and payload into f(62..)
+        f(42) := src_port(15 downto 8);
+        f(43) := src_port( 7 downto 0);
+        f(44) := dst_port(15 downto 8);
+        f(45) := dst_port( 7 downto 0);
+        for i in 0 to 3 loop
+            f(46 + i) := seq_num(31 - i*8 downto 24 - i*8);
+            f(50 + i) := ack_num(31 - i*8 downto 24 - i*8);
+        end loop;
+        f(54) := x"50";          -- Data offset 5 (no options), reserved
+        f(55) := flags;
+        f(56) := window(15 downto 8);
+        f(57) := window( 7 downto 0);
+        f(58) := x"00"; f(59) := x"00";  -- checksum (placeholder)
+        f(60) := x"00"; f(61) := x"00";  -- urgent pointer
+        for i in 0 to pl_len - 1 loop
+            f(62 + i) := payload(payload'low + i);
+        end loop;
+
+        -- TCP checksum = ones-complement over pseudo header + TCP segment
+        tcp_len_v := std_logic_vector(to_unsigned(tcp_len, 16));
+        for i in 0 to 3 loop
+            tcp_pseudo(i)     := sender_ip(31 - i*8 downto 24 - i*8);
+            tcp_pseudo(4 + i) := dut_ip(31 - i*8 downto 24 - i*8);
+        end loop;
+        tcp_pseudo(8)  := x"00";
+        tcp_pseudo(9)  := x"06";   -- protocol TCP
+        tcp_pseudo(10) := tcp_len_v(15 downto 8);
+        tcp_pseudo(11) := tcp_len_v( 7 downto 0);
+        for i in 0 to tcp_len - 1 loop
+            tcp_pseudo(12 + i) := f(42 + i);
+        end loop;
+        ck := ip_checksum(tcp_pseudo);
+        f(58) := ck(15 downto 8);
+        f(59) := ck( 7 downto 0);
 
         f(total - 4) := x"DE"; f(total - 3) := x"AD";
         f(total - 2) := x"BE"; f(total - 1) := x"EF";

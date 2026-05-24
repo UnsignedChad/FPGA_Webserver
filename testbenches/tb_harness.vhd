@@ -75,6 +75,47 @@ architecture sim of tb_harness is
     signal udp_tx_dst_ip   : std_logic_vector(31 downto 0) := (others => '0');
     signal udp_tx_dst_port : std_logic_vector(15 downto 0) := (others => '0');
 
+    -- ---- TCP RX/TX signals (main_design <-> tcp_engine) ----
+    -- tcp_engine is instantiated in FPGA_webserver.vhd (the top level), NOT
+    -- in main_design. The testbench provides it here so the state machine
+    -- (SYN handling, ACK, etc.) is part of the simulation.
+    signal tcp_rx_data_valid : std_logic;
+    signal tcp_rx_data       : std_logic_vector(7 downto 0);
+    signal tcp_rx_hdr_valid  : std_logic;
+    signal tcp_rx_src_ip     : std_logic_vector(31 downto 0);
+    signal tcp_rx_src_port   : std_logic_vector(15 downto 0);
+    signal tcp_rx_dst_port   : std_logic_vector(15 downto 0);
+    signal tcp_rx_seq_num    : std_logic_vector(31 downto 0);
+    signal tcp_rx_ack_num    : std_logic_vector(31 downto 0);
+    signal tcp_rx_window     : std_logic_vector(15 downto 0);
+    signal tcp_rx_flag_urg   : std_logic;
+    signal tcp_rx_flag_ack   : std_logic;
+    signal tcp_rx_flag_psh   : std_logic;
+    signal tcp_rx_flag_rst   : std_logic;
+    signal tcp_rx_flag_syn   : std_logic;
+    signal tcp_rx_flag_fin   : std_logic;
+    signal tcp_rx_urgent_ptr : std_logic_vector(15 downto 0);
+
+    signal tcp_tx_busy       : std_logic;
+    signal tcp_tx_data_valid : std_logic;
+    signal tcp_tx_data       : std_logic_vector(7 downto 0);
+    signal tcp_tx_hdr_valid  : std_logic;
+    signal tcp_tx_src_port   : std_logic_vector(15 downto 0);
+    signal tcp_tx_dst_ip     : std_logic_vector(31 downto 0);
+    signal tcp_tx_dst_port   : std_logic_vector(15 downto 0);
+    signal tcp_tx_seq_num    : std_logic_vector(31 downto 0);
+    signal tcp_tx_ack_num    : std_logic_vector(31 downto 0);
+    signal tcp_tx_window     : std_logic_vector(15 downto 0);
+    signal tcp_tx_flag_urg   : std_logic;
+    signal tcp_tx_flag_ack   : std_logic;
+    signal tcp_tx_flag_psh   : std_logic;
+    signal tcp_tx_flag_rst   : std_logic;
+    signal tcp_tx_flag_syn   : std_logic;
+    signal tcp_tx_flag_fin   : std_logic;
+    signal tcp_tx_urgent_ptr : std_logic_vector(15 downto 0);
+
+    signal tcp_engine_status : std_logic_vector(7 downto 0);
+
 begin
 
     -- 125 MHz / 8 ns period; clk90 lags by 2 ns
@@ -118,9 +159,83 @@ begin
             udp_tx_dst_mac       => udp_tx_dst_mac,
             udp_tx_dst_ip        => udp_tx_dst_ip,
             udp_tx_dst_port      => udp_tx_dst_port,
+            tcp_rx_data_valid    => tcp_rx_data_valid,
+            tcp_rx_data          => tcp_rx_data,
+            tcp_rx_hdr_valid     => tcp_rx_hdr_valid,
+            tcp_rx_src_ip        => tcp_rx_src_ip,
+            tcp_rx_src_port      => tcp_rx_src_port,
+            tcp_rx_dst_port      => tcp_rx_dst_port,
+            tcp_rx_seq_num       => tcp_rx_seq_num,
+            tcp_rx_ack_num       => tcp_rx_ack_num,
+            tcp_rx_window        => tcp_rx_window,
+            tcp_rx_flag_urg      => tcp_rx_flag_urg,
+            tcp_rx_flag_ack      => tcp_rx_flag_ack,
+            tcp_rx_flag_psh      => tcp_rx_flag_psh,
+            tcp_rx_flag_rst      => tcp_rx_flag_rst,
+            tcp_rx_flag_syn      => tcp_rx_flag_syn,
+            tcp_rx_flag_fin      => tcp_rx_flag_fin,
+            tcp_rx_urgent_ptr    => tcp_rx_urgent_ptr,
+            tcp_tx_busy          => tcp_tx_busy,
+            tcp_tx_data_valid    => tcp_tx_data_valid,
+            tcp_tx_data          => tcp_tx_data,
+            tcp_tx_hdr_valid     => tcp_tx_hdr_valid,
+            tcp_tx_src_port      => tcp_tx_src_port,
+            tcp_tx_dst_ip        => tcp_tx_dst_ip,
+            tcp_tx_dst_port      => tcp_tx_dst_port,
+            tcp_tx_seq_num       => tcp_tx_seq_num,
+            tcp_tx_ack_num       => tcp_tx_ack_num,
+            tcp_tx_window        => tcp_tx_window,
+            tcp_tx_flag_urg      => tcp_tx_flag_urg,
+            tcp_tx_flag_ack      => tcp_tx_flag_ack,
+            tcp_tx_flag_psh      => tcp_tx_flag_psh,
+            tcp_tx_flag_rst      => tcp_tx_flag_rst,
+            tcp_tx_flag_syn      => tcp_tx_flag_syn,
+            tcp_tx_flag_fin      => tcp_tx_flag_fin,
+            tcp_tx_urgent_ptr    => tcp_tx_urgent_ptr,
             eth_txck             => eth_txck,
             eth_txctl            => eth_txctl,
             eth_txd              => eth_txd);
+
+    -- tcp_engine — the state machine that responds to SYN, sends SYN-ACK,
+    -- echoes "FPGA says Hi", and tears down. Wired between the parsed RX
+    -- fields and TX request fields of main_design.
+    i_tcp_engine: entity work.tcp_engine
+        port map (
+            clk                  => clk125Mhz,
+            status               => tcp_engine_status,
+            tcp_rx_data_valid    => tcp_rx_data_valid,
+            tcp_rx_data          => tcp_rx_data,
+            tcp_rx_hdr_valid     => tcp_rx_hdr_valid,
+            tcp_rx_src_ip        => tcp_rx_src_ip,
+            tcp_rx_src_port      => tcp_rx_src_port,
+            tcp_rx_dst_port      => tcp_rx_dst_port,
+            tcp_rx_seq_num       => tcp_rx_seq_num,
+            tcp_rx_ack_num       => tcp_rx_ack_num,
+            tcp_rx_window        => tcp_rx_window,
+            tcp_rx_flag_urg      => tcp_rx_flag_urg,
+            tcp_rx_flag_ack      => tcp_rx_flag_ack,
+            tcp_rx_flag_psh      => tcp_rx_flag_psh,
+            tcp_rx_flag_rst      => tcp_rx_flag_rst,
+            tcp_rx_flag_syn      => tcp_rx_flag_syn,
+            tcp_rx_flag_fin      => tcp_rx_flag_fin,
+            tcp_rx_urgent_ptr    => tcp_rx_urgent_ptr,
+            tcp_tx_busy          => tcp_tx_busy,
+            tcp_tx_data_valid    => tcp_tx_data_valid,
+            tcp_tx_data          => tcp_tx_data,
+            tcp_tx_hdr_valid     => tcp_tx_hdr_valid,
+            tcp_tx_src_port      => tcp_tx_src_port,
+            tcp_tx_dst_ip        => tcp_tx_dst_ip,
+            tcp_tx_dst_port      => tcp_tx_dst_port,
+            tcp_tx_seq_num       => tcp_tx_seq_num,
+            tcp_tx_ack_num       => tcp_tx_ack_num,
+            tcp_tx_window        => tcp_tx_window,
+            tcp_tx_flag_urg      => tcp_tx_flag_urg,
+            tcp_tx_flag_ack      => tcp_tx_flag_ack,
+            tcp_tx_flag_psh      => tcp_tx_flag_psh,
+            tcp_tx_flag_rst      => tcp_tx_flag_rst,
+            tcp_tx_flag_syn      => tcp_tx_flag_syn,
+            tcp_tx_flag_fin      => tcp_tx_flag_fin,
+            tcp_tx_urgent_ptr    => tcp_tx_urgent_ptr);
 
     -- ----------------------------------------------------------------
     -- TX snoop: capture bytes flowing into tx_rgmii_sim via external name.
@@ -369,6 +484,56 @@ begin
                 report "PASS: UDP packet received with correct ports and payload";
                 n_passed := n_passed + 1;
             end if;
+        end if;
+
+        ----------------------------------------------------------------
+        report "=== Scenario 4: TCP SYN to port 80 -> SYN+ACK ===";
+        ----------------------------------------------------------------
+        -- Empty TCP payload; client seq = 0x12345678
+        push_frame(make_tcp(sender_mac, sender_ip,
+                            dut_mac_wire, dut_ip_wire,
+                            x"C350",                       -- src port 50000
+                            x"0050",                       -- dst port 80
+                            x"12345678", x"00000000",
+                            TCP_SYN,
+                            x"2000",                       -- window 8192
+                            byte_array_t'(0 to -1 => x"00")));  -- empty payload
+        wait_for_reply(100);
+
+        if not got_reply then
+            report "FAIL: no TX frame after TCP SYN" severity error;
+            n_failed := n_failed + 1;
+        elsif rx_frame_len < 60 then
+            report "FAIL: TCP reply too short (" & integer'image(rx_frame_len) & ")" severity error;
+            n_failed := n_failed + 1;
+        -- EtherType IPv4 at wire 12..13 -> rx_frame_buf 20..21
+        elsif rx_frame_buf(20) /= x"08" or rx_frame_buf(21) /= x"00" then
+            report "FAIL: TCP reply EtherType not IPv4" severity error;
+            n_failed := n_failed + 1;
+        -- IP protocol at wire 23 -> rx_frame_buf 31
+        elsif rx_frame_buf(31) /= x"06" then
+            report "FAIL: IP protocol not TCP (0x06) in reply" severity error;
+            n_failed := n_failed + 1;
+        -- TCP flags at wire 14+20+13=47 -> rx_frame_buf 55
+        elsif (unsigned(rx_frame_buf(55)) and unsigned(TCP_SYN)) = 0 or
+              (unsigned(rx_frame_buf(55)) and unsigned(TCP_ACK)) = 0 then
+            report "FAIL: TCP reply flags = 0x" &
+                   integer'image(to_integer(unsigned(rx_frame_buf(55)))) &
+                   ", expected SYN+ACK" severity error;
+            n_failed := n_failed + 1;
+        -- TCP ACK number bytes at wire 14+20+8..11 -> rx_frame_buf 50..53
+        -- Should equal client_seq + 1 = 0x12345679
+        elsif rx_frame_buf(50) /= x"12" or rx_frame_buf(51) /= x"34" or
+              rx_frame_buf(52) /= x"56" or rx_frame_buf(53) /= x"79" then
+            report "FAIL: TCP ACK# != client_seq+1" severity error;
+            n_failed := n_failed + 1;
+        -- TCP src port at wire 14+20+0..1 -> rx_frame_buf 42..43; reply should come FROM port 80
+        elsif rx_frame_buf(42) /= x"00" or rx_frame_buf(43) /= x"50" then
+            report "FAIL: TCP reply src port != 80" severity error;
+            n_failed := n_failed + 1;
+        else
+            report "PASS: TCP SYN+ACK received with correct ack# and src port";
+            n_passed := n_passed + 1;
         end if;
 
         ----------------------------------------------------------------
