@@ -481,8 +481,8 @@ process(clk)
                                 send_ack <='1';
                             end if;
                          elsif unsigned(session_ack_num) = unsigned(tosend_seq_num)+1 then
-                            tosend_seq_num      <= std_logic_vector(unsigned(tosend_seq_num) + 1);
-                            tosend_seq_num_next <= std_logic_vector(unsigned(tosend_seq_num) + 1);
+                            -- seq_num bump happens in send_packets process to keep that
+                            -- signal single-driver
                             if session_flag_ack = '1' and session_flag_fin = '1' then
                                 -- If we get a FIN+ACK we can send an ACK and straight to time_wait
                                 send_ack <='1';
@@ -562,6 +562,16 @@ send_packets: process(clk)
                             tosend_seq_num      <= std_logic_vector(unsigned(tosend_seq_num) + 1);
                             tosend_seq_num_next <= std_logic_vector(unsigned(tosend_seq_num) + 1);
                         end if;
+                    end if;
+                end if;
+            elsif state = state_fin_wait_1 then
+                -- mirror of the bump originally in the main state-machine process; kept
+                -- here to keep tosend_seq_num/_next single-driver for synthesis.
+                if session_hdr_valid = '1' then
+                    if session_ack_num /= tosend_seq_num
+                       and unsigned(session_ack_num) = unsigned(tosend_seq_num) + 1 then
+                        tosend_seq_num      <= std_logic_vector(unsigned(tosend_seq_num) + 1);
+                        tosend_seq_num_next <= std_logic_vector(unsigned(tosend_seq_num) + 1);
                     end if;
                 end if;
             end if;
