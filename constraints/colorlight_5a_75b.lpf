@@ -1,0 +1,58 @@
+# Colorlight 5A-75B v8 pinout for nextpnr-ecp5
+# pins from https://github.com/q3k/chubby75/blob/master/5a-75b/hardware_V8.0.md
+# uses the LEFT ethernet port (PHY U11 / connector J1)
+
+# 25 MHz oscillator, fed via PHY1 to FPGA pin P6
+LOCATE COMP "clk25mhz" SITE "P6";
+IOBUF PORT "clk25mhz" IO_TYPE=LVCMOS33;
+FREQUENCY PORT "clk25mhz" 25.000000 MHz;
+
+# user button (active low when pressed)
+LOCATE COMP "btn"      SITE "R7";
+IOBUF PORT "btn"       IO_TYPE=LVCMOS33;
+
+# single onboard LED, open drain, active low
+LOCATE COMP "led_n"    SITE "T6";
+IOBUF PORT "led_n"     IO_TYPE=LVCMOS33 OPENDRAIN=ON;
+
+# ------------------ phy U11 (J1 port) ------------------
+# shared with phy U13: reset, mdc, mdio
+LOCATE COMP "eth_rst_n" SITE "R6";
+LOCATE COMP "eth_mdc"   SITE "R5";
+LOCATE COMP "eth_mdio"  SITE "T4";
+
+# rgmii rx (phy -> fpga)
+LOCATE COMP "eth_rxck"  SITE "J1";
+LOCATE COMP "eth_rxctl" SITE "J2";
+LOCATE COMP "eth_rxd[0]" SITE "K2";
+LOCATE COMP "eth_rxd[1]" SITE "J3";
+LOCATE COMP "eth_rxd[2]" SITE "K1";
+LOCATE COMP "eth_rxd[3]" SITE "K3";
+
+# rgmii tx (fpga -> phy)
+LOCATE COMP "eth_txck"  SITE "L1";
+LOCATE COMP "eth_txctl" SITE "L2";
+LOCATE COMP "eth_txd[0]" SITE "M2";
+LOCATE COMP "eth_txd[1]" SITE "M1";
+LOCATE COMP "eth_txd[2]" SITE "P1";
+LOCATE COMP "eth_txd[3]" SITE "R1";
+
+# bank IO standards for all PHY signals
+IOBUF PORT "eth_rst_n" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_mdc"   IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_mdio"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxck"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxctl" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_rxd[3]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txck"  IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txctl" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txd[0]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txd[1]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txd[2]" IO_TYPE=LVCMOS33;
+IOBUF PORT "eth_txd[3]" IO_TYPE=LVCMOS33;
+
+# rx clock is 125 MHz at gigabit speeds
+FREQUENCY PORT "eth_rxck" 125.000000 MHz;
