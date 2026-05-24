@@ -130,6 +130,23 @@ architecture Behavioral of tx_interface is
     signal data        : STD_LOGIC_VECTOR (7 downto 0);
     signal data_valid  : STD_LOGIC;
     signal data_enable : STD_LOGIC;
+
+    -- 4k speed-matching fifo between tx_add_preamble and tx_rgmii
+    component tx_speed_fifo is
+        Port ( clk : in std_logic;
+               link_10mb, link_100mb, link_1000mb : in std_logic;
+               wr_data       : in  std_logic_vector(7 downto 0);
+               wr_data_valid : in  std_logic;
+               rd_data       : out std_logic_vector(7 downto 0);
+               rd_data_valid : out std_logic;
+               rd_enable     : out std_logic;
+               almost_full   : out std_logic);
+    end component;
+    signal fifo_out_data  : std_logic_vector(7 downto 0);
+    signal fifo_out_valid : std_logic;
+    signal fifo_pulse     : std_logic;
+    signal fifo_almost_full : std_logic;
+    signal arb_ready      : std_logic;
     signal data_error  : STD_LOGIC;
 
     component tx_rgmii is
@@ -150,7 +167,7 @@ begin
 i_tx_arbiter: tx_arbiter generic map(idle_time => "010111") Port map (
     clk => clk125MHz,
     ------------------------------
-    ready             => phy_ready,
+    ready             => arb_ready,
     
     ch0_request       => tcp_request,
     ch0_granted       => tcp_granted,
@@ -210,15 +227,29 @@ i_tx_add_preamble: tx_add_preamble port map (
 -- link_1000mb : in  STD_LOGIC;
 ----------------------------------------------------------------------
 
+i_tx_speed_fifo: tx_speed_fifo port map (
+    clk           => clk125MHz,
+    link_10mb     => link_10mb,
+    link_100mb    => link_100mb,
+    link_1000mb   => link_1000mb,
+    wr_data       => framed_data,
+    wr_data_valid => framed_data_valid,
+    rd_data       => fifo_out_data,
+    rd_data_valid => fifo_out_valid,
+    rd_enable     => fifo_pulse,
+    almost_full   => fifo_almost_full);
+
+arb_ready <= phy_ready and (not fifo_almost_full);
+
 i_tx_rgmii: tx_rgmii port map (
     clk         => clk125MHz,
     clk90       => clk125MHz90,
     phy_ready   => phy_ready,
 
-    data_valid  => framed_data_valid,
-    data        => framed_data,
+    data_valid  => fifo_out_valid,
+    data        => fifo_out_data,
     data_error  => '0',
-    data_enable => '1',
+    data_enable => fifo_pulse,
 
     eth_txck  => eth_txck,
     eth_txctl => eth_txctl,
