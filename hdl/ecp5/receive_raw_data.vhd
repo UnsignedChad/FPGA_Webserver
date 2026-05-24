@@ -45,8 +45,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
-library ecp5u;
-use ecp5u.components.all;
+-- ECP5 DDR input primitive as local component blackbox
 
 entity receive_raw_data is
     Port ( eth_rxck        : in  STD_LOGIC;
@@ -59,6 +58,15 @@ entity receive_raw_data is
 end receive_raw_data;
 
 architecture ecp5 of receive_raw_data is
+    component IDDRX1F is
+        port (
+            D    : in  std_logic;
+            SCLK : in  std_logic;
+            RST  : in  std_logic;
+            Q0   : out std_logic;
+            Q1   : out std_logic);
+    end component;
+
     signal raw_ctl  : std_logic_vector(1 downto 0);
     signal raw_data : std_logic_vector(7 downto 0) := (others => '0');
     signal data_enable_last : std_logic := '0';

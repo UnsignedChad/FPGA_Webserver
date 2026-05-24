@@ -9,8 +9,8 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
-library ecp5u;
-use ecp5u.components.all;
+-- ECP5 PLL primitive declared as local component (blackbox to ghdl,
+-- bound by yosys synth_ecp5)
 
 entity clocking is
     Port ( clk100MHz   : in  STD_LOGIC;   -- misnamed; on the 5a-75b this is 25 mhz from P6
@@ -19,6 +19,46 @@ entity clocking is
 end clocking;
 
 architecture ecp5 of clocking is
+    component EHXPLLL is
+        generic (
+            CLKI_DIV      : integer := 1;
+            CLKFB_DIV     : integer := 1;
+            CLKOP_DIV     : integer := 8;
+            CLKOS_DIV     : integer := 8;
+            CLKOS2_DIV    : integer := 8;
+            CLKOS3_DIV    : integer := 8;
+            CLKOP_ENABLE  : string  := "ENABLED";
+            CLKOS_ENABLE  : string  := "DISABLED";
+            CLKOS2_ENABLE : string  := "DISABLED";
+            CLKOS3_ENABLE : string  := "DISABLED";
+            CLKOP_CPHASE  : integer := 0;
+            CLKOS_CPHASE  : integer := 0;
+            CLKOP_FPHASE  : integer := 0;
+            CLKOS_FPHASE  : integer := 0;
+            FEEDBK_PATH   : string  := "CLKOP";
+            CLKOP_TRIM_POL    : string := "RISING";
+            CLKOP_TRIM_DELAY  : integer := 0;
+            CLKOS_TRIM_POL    : string := "RISING";
+            CLKOS_TRIM_DELAY  : integer := 0;
+            OUTDIVIDER_MUXA : string := "DIVA";
+            OUTDIVIDER_MUXB : string := "DIVB";
+            OUTDIVIDER_MUXC : string := "DIVC";
+            OUTDIVIDER_MUXD : string := "DIVD";
+            PLL_LOCK_MODE : integer := 0;
+            STDBY_ENABLE  : string  := "DISABLED";
+            PLLRST_ENA    : string  := "DISABLED";
+            INTFB_WAKE    : string  := "DISABLED";
+            DPHASE_SOURCE : string  := "DISABLED");
+        port (
+            CLKI, CLKFB        : in  std_logic;
+            PHASESEL0, PHASESEL1, PHASEDIR, PHASESTEP, PHASELOADREG : in std_logic;
+            STDBY, PLLWAKESYNC : in  std_logic;
+            RST                : in  std_logic;
+            ENCLKOP, ENCLKOS, ENCLKOS2, ENCLKOS3 : in std_logic;
+            CLKOP, CLKOS, CLKOS2, CLKOS3 : out std_logic;
+            LOCK               : out std_logic);
+    end component;
+
     signal clk_op : std_logic;
     signal clk_os : std_logic;
     signal lock_o : std_logic;

@@ -37,8 +37,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
-library ecp5u;
-use ecp5u.components.all;
+-- ECP5 DDR output primitive as local component blackbox
 
 entity tx_rgmii is
     Port ( clk         : in STD_LOGIC;
@@ -56,6 +55,15 @@ entity tx_rgmii is
 end tx_rgmii;
 
 architecture ecp5 of tx_rgmii is
+    component ODDRX1F is
+        port (
+            SCLK : in  std_logic;
+            RST  : in  std_logic;
+            D0   : in  std_logic;
+            D1   : in  std_logic;
+            Q    : out std_logic);
+    end component;
+
     signal enable_count        : unsigned(6 downto 0) := (others => '0');
 
     signal enable_frequency    : unsigned(6 downto 0) := (others => '1');
