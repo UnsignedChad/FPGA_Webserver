@@ -55,19 +55,19 @@ sim/.analyzed: $(ALL_SIM_SRC)
 run: analyze
 	@test -n "$(TB)" || { echo "Set TB=<testbench-name>"; exit 1; }
 	$(GHDL) -e $(GHDL_FLAGS) $(TB)
-	$(GHDL) -r $(GHDL_FLAGS) $(TB) --stop-time=$(or $(STOP),1ms)
+	$(GHDL) -r $(GHDL_FLAGS) $(TB) --ieee-asserts=disable --stop-time=$(or $(STOP),1ms)
 
 wave: analyze
 	@test -n "$(TB)" || { echo "Set TB=<testbench-name>"; exit 1; }
 	$(GHDL) -e $(GHDL_FLAGS) $(TB)
-	$(GHDL) -r $(GHDL_FLAGS) $(TB) --wave=sim/$(TB).ghw --stop-time=$(or $(STOP),1ms)
+	$(GHDL) -r $(GHDL_FLAGS) $(TB) --ieee-asserts=disable --wave=sim/$(TB).ghw --stop-time=$(or $(STOP),1ms)
 
 sim-tbs: analyze
 	@fail=0; \
 	for tb in $(TBS_NAMES); do \
 	    echo "=== $$tb ==="; \
 	    $(GHDL) -e $(GHDL_FLAGS) $$tb 2>&1 && \
-	    $(GHDL) -r $(GHDL_FLAGS) $$tb --stop-time=$(or $(STOP),1ms) 2>&1 || fail=1; \
+	    $(GHDL) -r $(GHDL_FLAGS) $$tb --ieee-asserts=disable --stop-time=$(or $(STOP),1ms) 2>&1 || fail=1; \
 	done; \
 	exit $$fail
 

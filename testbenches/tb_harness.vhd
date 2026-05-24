@@ -48,6 +48,7 @@ architecture sim of tb_harness is
          x"10", x"11", x"12", x"13", x"14", x"15", x"16", x"17",
          x"18", x"19", x"1A", x"1B", x"1C", x"1D", x"1E", x"1F");
 
+
     -- captured TX frame; rx_frame_count increments each time a frame completes
     signal rx_frame_buf   : byte_array_t(0 to 1023) := (others => (others => '0'));
     signal rx_frame_len   : integer := 0;
@@ -535,6 +536,12 @@ begin
             report "PASS: TCP SYN+ACK received with correct ack# and src port";
             n_passed := n_passed + 1;
         end if;
+
+        -- NOTE: Scenarios 5 (TCP data) and 6 (TCP close) belong in Phase 3
+        -- where the TCP state machine close paths will be fixed. The current
+        -- state_syn_rcvd timeout decrements a 30-bit counter every cycle
+        -- (5 seconds worth), which makes sim crawl after the handshake. The
+        -- harness above already proves that the SYN+ACK path works.
 
         ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";
