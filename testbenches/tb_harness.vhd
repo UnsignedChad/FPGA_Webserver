@@ -330,6 +330,15 @@ begin
             input_empty <= '1';
         end procedure;
 
+        -- Same as push_frame but inverts the last byte of the FCS, so the
+        -- frame fails CRC validation in defragment_and_check_crc.
+        procedure push_frame_with_bad_fcs(constant bytes : byte_array_t) is
+            variable corrupted : byte_array_t(bytes'range) := bytes;
+        begin
+            corrupted(corrupted'high) := not corrupted(corrupted'high);
+            push_frame(corrupted);
+        end procedure;
+
         -- sender_mac / sender_ip are network-order constants (NOT byte-reversed)
         constant sender_mac : std_logic_vector(47 downto 0) := x"A0_B3_CC_4C_F9_EF";
         constant sender_ip  : std_logic_vector(31 downto 0) := x"0A_00_00_01";  -- 10.0.0.1
@@ -537,11 +546,26 @@ begin
             n_passed := n_passed + 1;
         end if;
 
-        -- NOTE: Scenarios 5 (TCP data) and 6 (TCP close) belong in Phase 3
-        -- where the TCP state machine close paths will be fixed. The current
+        -- NOTE: TCP data (Scenario 5) and TCP close (Scenario 6) belong in
+        -- Phase 3 where the half-finished close states will be addressed. The
         -- state_syn_rcvd timeout decrements a 30-bit counter every cycle
-        -- (5 seconds worth), which makes sim crawl after the handshake. The
-        -- harness above already proves that the SYN+ACK path works.
+        -- (~5 s worth), which makes sim crawl after the SYN handshake. The
+        -- scenarios above already prove the SYN+ACK path.
+
+        ----------------------------------------------------------------
+        report "=== Scenario 5 (Phase 2): bad-CRC frame must be dropped ===";
+        ----------------------------------------------------------------
+        -- Send another ARP request but corrupt the FCS. Expect no reply.
+        push_frame_with_bad_fcs(make_arp_request(sender_mac, sender_ip, dut_ip_wire));
+        wait_for_reply(40);
+
+        if got_reply then
+            report "FAIL: DUT replied to bad-CRC frame (CRC check broken)" severity error;
+            n_failed := n_failed + 1;
+        else
+            report "PASS: bad-CRC frame dropped";
+            n_passed := n_passed + 1;
+        end if;
 
         ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";

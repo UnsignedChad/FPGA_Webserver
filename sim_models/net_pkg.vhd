@@ -27,6 +27,16 @@ package net_pkg is
 
     function ip_checksum(buf : byte_array_t) return std_logic_vector;
 
+    -- IEEE 802.3 Ethernet CRC32 (polynomial 0xEDB88320, reflected, init/xor 0xFFFFFFFF).
+    -- Returns the 4-byte FCS as it appears on the wire (LSB-first byte order).
+    function eth_crc32(buf : byte_array_t) return byte_array_t;
+
+    -- Compute and append FCS to frame_bytes(eth_start..pad_end-1), writing it
+    -- into the last 4 byte positions. Convenience helper for make_* builders.
+    procedure attach_fcs(variable frame : inout byte_array_t;
+                         constant eth_start : in integer;
+                         constant fcs_start : in integer);
+
     function make_arp_request(
         sender_mac : std_logic_vector(47 downto 0);
         sender_ip  : std_logic_vector(31 downto 0);
@@ -99,6 +109,47 @@ package body net_pkg is
         return std_logic_vector(not sum(15 downto 0));
     end function;
 
+    function eth_crc32(buf : byte_array_t) return byte_array_t is
+        variable crc  : unsigned(31 downto 0) := (others => '1');
+        variable b    : unsigned(7 downto 0);
+        variable bit0 : std_logic;
+        variable out_buf : byte_array_t(0 to 3);
+    begin
+        for i in buf'low to buf'high loop
+            b := unsigned(buf(i));
+            crc := crc xor (x"000000" & b);
+            for k in 0 to 7 loop
+                bit0 := crc(0);
+                crc := "0" & crc(31 downto 1);
+                if bit0 = '1' then
+                    crc := crc xor x"EDB88320";
+                end if;
+            end loop;
+        end loop;
+        crc := crc xor x"FFFFFFFF";
+        -- FCS goes on the wire LSB-first
+        out_buf(0) := std_logic_vector(crc( 7 downto  0));
+        out_buf(1) := std_logic_vector(crc(15 downto  8));
+        out_buf(2) := std_logic_vector(crc(23 downto 16));
+        out_buf(3) := std_logic_vector(crc(31 downto 24));
+        return out_buf;
+    end function;
+
+    procedure attach_fcs(variable frame : inout byte_array_t;
+                         constant eth_start : in integer;
+                         constant fcs_start : in integer) is
+        variable payload_view : byte_array_t(0 to fcs_start - eth_start - 1);
+        variable fcs          : byte_array_t(0 to 3);
+    begin
+        for i in 0 to payload_view'high loop
+            payload_view(i) := frame(eth_start + i);
+        end loop;
+        fcs := eth_crc32(payload_view);
+        for i in 0 to 3 loop
+            frame(fcs_start + i) := fcs(i);
+        end loop;
+    end procedure;
+
     function make_arp_request(
         sender_mac : std_logic_vector(47 downto 0);
         sender_ip  : std_logic_vector(31 downto 0);
@@ -127,7 +178,8 @@ package body net_pkg is
         for i in 0 to 3 loop
             f(46 + i) := target_ip(31 - i*8 downto 24 - i*8);
         end loop;
-        f(68) := x"DE"; f(69) := x"AD"; f(70) := x"BE"; f(71) := x"EF";
+        -- Compute proper FCS over the frame body (after 8-byte preamble, before FCS)
+        attach_fcs(f, 8, 68);
         return f;
     end function;
 
@@ -217,9 +269,8 @@ package body net_pkg is
         for i in 0 to icmp_len - 1 loop
             f(42 + i) := icmp_buf(i);
         end loop;
-        -- pad + placeholder FCS (last 4 bytes) already zero
-        f(total - 4) := x"DE"; f(total - 3) := x"AD";
-        f(total - 2) := x"BE"; f(total - 1) := x"EF";
+        -- Proper Ethernet FCS over bytes 8..total-5 (preamble excluded, FCS slot last 4)
+        attach_fcs(f, 8, total - 4);
         return f;
     end function;
 
@@ -291,8 +342,7 @@ package body net_pkg is
             f(50 + i) := payload(payload'low + i);
         end loop;
 
-        f(total - 4) := x"DE"; f(total - 3) := x"AD";
-        f(total - 2) := x"BE"; f(total - 1) := x"EF";
+        attach_fcs(f, 8, total - 4);
         return f;
     end function;
 
@@ -391,8 +441,7 @@ package body net_pkg is
         f(58) := ck(15 downto 8);
         f(59) := ck( 7 downto 0);
 
-        f(total - 4) := x"DE"; f(total - 3) := x"AD";
-        f(total - 2) := x"BE"; f(total - 1) := x"EF";
+        attach_fcs(f, 8, total - 4);
         return f;
     end function;
 
