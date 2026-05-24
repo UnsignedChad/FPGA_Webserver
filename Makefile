@@ -20,12 +20,13 @@ GHDL_FLAGS := $(STD) --workdir=sim -fsynopsys -frelaxed
 SIM_EXCLUDE := -name arp_resolver.vhd -o -name clocking.vhd -o -name tx_rgmii.vhd -o -name receive_raw_data.vhd -o -name FPGA_webserver.vhd
 
 RTL_SIM := $(shell find hdl -name "*.vhd" ! \( $(SIM_EXCLUDE) \) | sort)
+SIM_STUBS := $(shell find sim_models -name "*.vhd" 2>/dev/null | sort)
 
 # Testbenches that target FPGA_webserver (top, needs UNISIM) excluded from sim flow
 TB_SIM_EXCLUDE := -name tb_FPGA_webserver.vhd
 TBS_SIM := $(shell find testbenches -name "tb_*.vhd" ! \( $(TB_SIM_EXCLUDE) \) | sort)
 
-ALL_SIM_SRC := $(RTL_SIM) $(TBS_SIM)
+ALL_SIM_SRC := $(RTL_SIM) $(SIM_STUBS) $(TBS_SIM)
 TBS_NAMES := $(notdir $(basename $(TBS_SIM)))
 
 .PHONY: all analyze run wave sim-tbs clean help
