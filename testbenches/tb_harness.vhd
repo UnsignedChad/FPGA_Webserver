@@ -622,11 +622,13 @@ begin
             n_passed := n_passed + 1;
         end if;
 
-        -- Phase 3 TCP data/close scenarios deferred: with the harness driving
-        -- a SYN+ACK then ACK, the engine reaches state_established but sim
-        -- progress slows dramatically (suggests a busy combinational path or
-        -- state thrash that needs deeper investigation). The SYN+ACK reply
-        -- itself (Scenario 4) plus all the RX-validation paths are proven.
+        -- Phase 3 scenario (TCP handshake completion + data) is deferred.
+        -- Sending the client ACK transitions the engine to state_established
+        -- and at that point GHDL throughput drops by ~30x with no obvious
+        -- single culprit (it's not the add_data counter increments — that
+        -- fix is still helpful but didn't restore throughput on its own).
+        -- Likely culprit is a downstream signal chain that gets activated
+        -- only once tcp_tx_busy goes low; needs targeted profiling.
 
         ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";

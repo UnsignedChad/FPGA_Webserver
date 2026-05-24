@@ -93,8 +93,13 @@ process(clk)
             read_en <= '0';
             out_hdr_valid <= '0';
             out_data_valid <= '0';
-            address <= std_logic_vector(unsigned(address)+1);
-            data_left_to_go <= data_left_to_go-1;
+            -- Only step address/data_left_to_go while actively producing a
+            -- packet; otherwise content_memory cycles every cycle and floods
+            -- the simulator with downstream events for nothing.
+            if state = first_data or state = adding_data then
+                address <= std_logic_vector(unsigned(address)+1);
+                data_left_to_go <= data_left_to_go-1;
+            end if;
             case state is
                 when waiting     =>
                     if empty = '0' then
