@@ -339,6 +339,17 @@ begin
             push_frame(corrupted);
         end procedure;
 
+        -- Corrupt the IP TTL byte (at wire offset 22 -> +8 preamble = 30) and
+        -- recompute a valid FCS, so the frame passes CRC but fails IP checksum.
+        procedure push_frame_with_corrupt_ip(constant bytes : byte_array_t) is
+            variable corrupted : byte_array_t(bytes'range) := bytes;
+        begin
+            corrupted(30) := not corrupted(30);
+            -- Recompute FCS over the frame body (after 8-byte preamble)
+            attach_fcs(corrupted, 8, corrupted'high - 3);
+            push_frame(corrupted);
+        end procedure;
+
         -- sender_mac / sender_ip are network-order constants (NOT byte-reversed)
         constant sender_mac : std_logic_vector(47 downto 0) := x"A0_B3_CC_4C_F9_EF";
         constant sender_ip  : std_logic_vector(31 downto 0) := x"0A_00_00_01";  -- 10.0.0.1
@@ -581,6 +592,25 @@ begin
             n_failed := n_failed + 1;
         else
             report "PASS: wrong-MAC unicast frame dropped";
+            n_passed := n_passed + 1;
+        end if;
+
+        ----------------------------------------------------------------
+        report "=== Scenario 7 (Phase 2): bad IP header checksum must be dropped ===";
+        ----------------------------------------------------------------
+        -- Build a valid ICMP echo, then corrupt the IP header so the IP checksum no
+        -- longer matches. The IP TTL byte is at wire offset 14+8 = 22 -> +8 preamble = 30.
+        -- Inverting it makes the header checksum invalid but leaves the frame CRC valid
+        -- because we recompute the FCS afterwards.
+        push_frame_with_corrupt_ip(make_icmp_echo(sender_mac, sender_ip,
+                                                   dut_mac_wire, dut_ip_wire,
+                                                   x"BEEF", x"0003", PING_PAYLOAD));
+        wait_for_reply(40);
+        if got_reply then
+            report "FAIL: DUT replied to frame with bad IP header checksum" severity error;
+            n_failed := n_failed + 1;
+        else
+            report "PASS: bad-IP-checksum frame dropped";
             n_passed := n_passed + 1;
         end if;
 
