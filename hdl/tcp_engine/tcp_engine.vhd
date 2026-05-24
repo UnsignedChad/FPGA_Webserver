@@ -36,6 +36,11 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 entity tcp_engine is 
+    generic (
+        -- Number of clock cycles for state-machine timeouts. The synthesis
+        -- default models ~5 seconds at 125 MHz; testbenches override to a
+        -- much smaller value so the SYN-RCVD timeout does not stall sim.
+        timeout_cycles : natural := 5 * 125_000_000);
     port (  clk                : in  STD_LOGIC;
 
             status               : out std_logic_vector(7 downto 0) := (others => '0');    
@@ -337,7 +342,7 @@ timeout_proc: process(clk)
         if rising_edge(clk) then
             timeout <= '0';
             if last_state /= state then
-                timeout_counter <= to_unsigned(5*125_000_000,30); -- 5 seconds                
+                timeout_counter <= to_unsigned(timeout_cycles, 30); -- generic-driven
                 timeout <= '0';
             elsif timeout_counter = 0 then
                 timeout <= '1';

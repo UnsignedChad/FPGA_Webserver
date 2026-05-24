@@ -48,6 +48,14 @@ architecture sim of tb_harness is
          x"10", x"11", x"12", x"13", x"14", x"15", x"16", x"17",
          x"18", x"19", x"1A", x"1B", x"1C", x"1D", x"1E", x"1F");
 
+    -- "GET / HTTP/1.0\r\n\r\n" - 18 bytes
+    constant HTTP_GET : byte_array_t(0 to 17) :=
+        (x"47", x"45", x"54", x"20",
+         x"2F", x"20",
+         x"48", x"54", x"54", x"50",
+         x"2F", x"31", x"2E", x"30",
+         x"0D", x"0A", x"0D", x"0A");
+
 
     -- captured TX frame; rx_frame_count increments each time a frame completes
     signal rx_frame_buf   : byte_array_t(0 to 1023) := (others => (others => '0'));
@@ -199,8 +207,12 @@ begin
 
     -- tcp_engine — the state machine that responds to SYN, sends SYN-ACK,
     -- echoes "FPGA says Hi", and tears down. Wired between the parsed RX
-    -- fields and TX request fields of main_design.
+    -- fields and TX request fields of main_design. Override the 5-second
+    -- production timeout to ~100us; that is short enough not to bog sim
+    -- down with billion-cycle decrements, but long enough that none of the
+    -- test scenarios trip the timeout mid-handshake.
     i_tcp_engine: entity work.tcp_engine
+        generic map (timeout_cycles => 125000)  -- 1 ms, exceeds longest scenario
         port map (
             clk                  => clk125Mhz,
             status               => tcp_engine_status,
@@ -364,6 +376,7 @@ begin
         variable last_udp_cnt   : integer := 0;
         variable got_reply      : boolean;
         variable got_udp        : boolean;
+        variable dut_seq        : std_logic_vector(31 downto 0);
 
         -- Wait up to timeout_us microseconds for the snoop to capture
         -- a new TX frame (rx_frame_count increment). Sets got_reply.
@@ -557,11 +570,6 @@ begin
             n_passed := n_passed + 1;
         end if;
 
-        -- NOTE: TCP data (Scenario 5) and TCP close (Scenario 6) belong in
-        -- Phase 3 where the half-finished close states will be addressed. The
-        -- state_syn_rcvd timeout decrements a 30-bit counter every cycle
-        -- (~5 s worth), which makes sim crawl after the SYN handshake. The
-        -- scenarios above already prove the SYN+ACK path.
 
         ----------------------------------------------------------------
         report "=== Scenario 5 (Phase 2): bad-CRC frame must be dropped ===";
@@ -613,6 +621,12 @@ begin
             report "PASS: bad-IP-checksum frame dropped";
             n_passed := n_passed + 1;
         end if;
+
+        -- Phase 3 TCP data/close scenarios deferred: with the harness driving
+        -- a SYN+ACK then ACK, the engine reaches state_established but sim
+        -- progress slows dramatically (suggests a busy combinational path or
+        -- state thrash that needs deeper investigation). The SYN+ACK reply
+        -- itself (Scenario 4) plus all the RX-validation paths are proven.
 
         ----------------------------------------------------------------
         report "=== SUMMARY: " & integer'image(n_passed) & " passed, " & integer'image(n_failed) & " failed ===";
