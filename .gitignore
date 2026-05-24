@@ -1,2 +1,4 @@
 sim/
 build/
+e~*.o
+tb_harness
