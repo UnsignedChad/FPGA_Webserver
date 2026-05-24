@@ -481,8 +481,10 @@ i_udp_test_sink: udp_test_sink port map (
 
 process(clk125Mhz)
     begin
-        if tcp_rx_hdr_valid = '1' then
-            leds <= tcp_engine_status;
+        if rising_edge(clk125Mhz) then
+            if tcp_rx_hdr_valid = '1' then
+                leds <= tcp_engine_status;
+            end if;
         end if;
     end process;
 
